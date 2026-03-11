@@ -35,9 +35,11 @@ export default function SessionChat({ sessionId, isActive, onSessionDead }: Sess
 
   // When this session becomes active, sync ALL global agentStore state
   // so the UI correctly reflects this session's current state.
+  // When it becomes inactive, clear global state so the next session starts clean.
   const prevActiveRef = useRef(isActive);
   useEffect(() => {
     if (isActive && !prevActiveRef.current) {
+      // ── Becoming active: restore this session's state ──
       const store = useAgentStore.getState();
 
       // SSE transport has no persistent connection — always connected
@@ -101,6 +103,12 @@ export default function SessionChat({ sessionId, isActive, onSessionDead }: Sess
           store.setProcessing(false);
         }
       }
+    } else if (!isActive && prevActiveRef.current) {
+      // ── Becoming inactive: clear global state so the next session starts clean ──
+      const store = useAgentStore.getState();
+      store.setActivityStatus({ type: 'idle' });
+      store.setProcessing(false);
+      store.clearPanel();
     }
     prevActiveRef.current = isActive;
   }, [isActive, messages]);
