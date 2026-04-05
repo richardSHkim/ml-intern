@@ -145,6 +145,7 @@ if [ -d "${EVAL_DIR}/final_model" ] && [ -f "${EVAL_DIR}/final_model/config.json
         bash -c '
             export HF_HOME="/root/.cache/huggingface"
             export VLLM_API_KEY="inspectai"
+            export OPENAI_API_KEY="'"${OPENAI_API_KEY:-}"'"
             unset HF_HUB_ENABLE_HF_TRANSFER
             python evaluate.py \
                 --model-path /eval_dir/final_model \
