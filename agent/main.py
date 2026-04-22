@@ -451,7 +451,9 @@ async def event_listener(
                 tool = event.data.get("tool", "") if event.data else ""
                 log = event.data.get("log", "") if event.data else ""
                 if log:
-                    print_tool_log(tool, log)
+                    agent_id = event.data.get("agent_id", "") if event.data else ""
+                    label = event.data.get("label", "") if event.data else ""
+                    print_tool_log(tool, log, agent_id=agent_id, label=label)
             elif event.event_type == "tool_state_change":
                 pass  # visual noise — approval flow handles this
             elif event.event_type == "error":
@@ -1204,10 +1206,10 @@ async def headless_main(
     stream_buf = _StreamBuffer(console)
     _hl_last_tool = [None]
     _hl_sub_id = [1]
-    # Research sub-agent tool calls are buffered and dumped once the sub-agent
-    # finishes, instead of streaming via the live redrawing SubAgentDisplay.
-    _hl_research_calls: list[str] = []
-    _hl_in_research = [False]
+    # Research sub-agent tool calls are buffered per agent_id and dumped as
+    # a static block once each sub-agent finishes, instead of streaming via
+    # the live redrawing SubAgentDisplayManager (which is TTY-only).
+    _hl_research_buffers: dict[str, dict] = {}
 
     while True:
         event = await event_queue.get()
@@ -1243,26 +1245,34 @@ async def headless_main(
             if not log:
                 pass
             elif tool == "research":
-                # Buffer research sub-agent activity; on completion, dump a
-                # single static block that mirrors the live overlay's styling
-                # without its line-erasing redraws (unfit for non-TTY output).
+                # Headless mode: buffer research sub-agent activity per-agent,
+                # then dump each as a static block on completion. The live
+                # SubAgentDisplayManager uses terminal cursor tricks that are
+                # unfit for non-TTY output, but parallel agents still need
+                # distinct output so we key buffers by agent_id.
+                agent_id = event.data.get("agent_id", "") if event.data else ""
+                label = event.data.get("label", "") if event.data else ""
+                aid = agent_id or "research"
                 if log == "Starting research sub-agent...":
-                    _hl_in_research[0] = True
-                    _hl_research_calls.clear()
+                    _hl_research_buffers[aid] = {
+                        "label": label or "research",
+                        "calls": [],
+                    }
                 elif log == "Research complete.":
-                    _hl_in_research[0] = False
-                    f = get_console().file
-                    f.write("  \033[38;2;255;200;80m▸ research\033[0m\n")
-                    for call in _hl_research_calls:
-                        f.write(f"    \033[2m{call}\033[0m\n")
-                    f.flush()
-                    _hl_research_calls.clear()
+                    buf = _hl_research_buffers.pop(aid, None)
+                    if buf is not None:
+                        f = get_console().file
+                        f.write(f"  \033[38;2;255;200;80m▸ {buf['label']}\033[0m\n")
+                        for call in buf["calls"]:
+                            f.write(f"    \033[2m{call}\033[0m\n")
+                        f.flush()
                 elif log.startswith("tokens:") or log.startswith("tools:"):
                     pass  # stats updates — only useful for the live display
-                elif _hl_in_research[0]:
-                    _hl_research_calls.append(log)
+                elif aid in _hl_research_buffers:
+                    _hl_research_buffers[aid]["calls"].append(log)
                 else:
-                    print_tool_log(tool, log)
+                    # Orphan event (Start was missed) — fall back to raw print
+                    print_tool_log(tool, log, agent_id=agent_id, label=label)
             else:
                 print_tool_log(tool, log)
         elif event.event_type == "approval_required":

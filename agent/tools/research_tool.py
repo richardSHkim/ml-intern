@@ -222,7 +222,7 @@ def _get_research_model(main_model: str) -> str:
 
 
 async def research_handler(
-    arguments: dict[str, Any], session=None, **_kw
+    arguments: dict[str, Any], session=None, tool_call_id: str | None = None, **_kw
 ) -> tuple[str, bool]:
     """Execute a research sub-agent with its own context."""
     task = arguments.get("task", "")
@@ -259,11 +259,28 @@ async def research_handler(
         if spec["function"]["name"] in RESEARCH_TOOL_NAMES
     ]
 
+    # Unique ID + short label so parallel agents show separate status lines.
+    # Use the tool_call_id when available — it's unique per invocation and lets
+    # the frontend match a research tool card to its agent state. Fall back to
+    # uuid for offline/test paths. Previously used md5(task), which collided
+    # when the same task string was researched in parallel.
+    if tool_call_id:
+        _agent_id = tool_call_id
+    else:
+        import uuid
+        _agent_id = uuid.uuid4().hex[:8]
+    _agent_label = "research: " + (task[:50] + "…" if len(task) > 50 else task)
+
     async def _log(text: str) -> None:
         """Send a progress event to the UI so it doesn't look frozen."""
         try:
             await session.send_event(
-                Event(event_type="tool_log", data={"tool": "research", "log": text})
+                Event(event_type="tool_log", data={
+                    "tool": "research",
+                    "log": text,
+                    "agent_id": _agent_id,
+                    "label": _agent_label,
+                })
             )
         except Exception:
             pass

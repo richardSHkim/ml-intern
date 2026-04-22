@@ -690,7 +690,7 @@ class Handlers:
                         if not valid:
                             return (tc, name, args, err, False)
                         out, ok = await session.tool_router.call_tool(
-                            name, args, session=session
+                            name, args, session=session, tool_call_id=tc.id
                         )
                         return (tc, name, args, out, ok)
 
