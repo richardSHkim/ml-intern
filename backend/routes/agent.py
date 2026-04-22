@@ -30,7 +30,7 @@ from models import (
 )
 from session_manager import MAX_SESSIONS, SessionCapacityError, session_manager
 
-from agent.core.agent_loop import _resolve_hf_router_params
+from agent.core.llm_params import _resolve_llm_params
 
 logger = logging.getLogger(__name__)
 
@@ -44,19 +44,19 @@ AVAILABLE_MODELS = [
         "recommended": True,
     },
     {
-        "id": "huggingface/fireworks-ai/MiniMaxAI/MiniMax-M2.5",
-        "label": "MiniMax M2.5",
+        "id": "MiniMaxAI/MiniMax-M2.7",
+        "label": "MiniMax M2.7",
         "provider": "huggingface",
         "recommended": True,
     },
     {
-        "id": "huggingface/novita/moonshotai/kimi-k2.5",
-        "label": "Kimi K2.5",
+        "id": "moonshotai/Kimi-K2.6",
+        "label": "Kimi K2.6",
         "provider": "huggingface",
     },
     {
-        "id": "huggingface/novita/zai-org/glm-5",
-        "label": "GLM 5",
+        "id": "zai-org/GLM-5.1",
+        "label": "GLM 5.1",
         "provider": "huggingface",
     },
 ]
@@ -93,7 +93,7 @@ async def llm_health_check() -> LLMHealthResponse:
     """
     model = session_manager.config.model_name
     try:
-        llm_params = _resolve_hf_router_params(model)
+        llm_params = _resolve_llm_params(model, reasoning_effort="high")
         await acompletion(
             messages=[{"role": "user", "content": "hi"}],
             max_tokens=1,
@@ -163,7 +163,7 @@ async def generate_title(
 ) -> dict:
     """Generate a short title for a chat session based on the first user message."""
     model = session_manager.config.model_name
-    llm_params = _resolve_hf_router_params(model)
+    llm_params = _resolve_llm_params(model, reasoning_effort="high")
     try:
         response = await acompletion(
             messages=[
@@ -235,6 +235,33 @@ async def get_session(
     _check_session_access(session_id, user)
     info = session_manager.get_session_info(session_id)
     return SessionInfo(**info)
+
+
+@router.post("/session/{session_id}/model")
+async def set_session_model(
+    session_id: str, body: dict, user: dict = Depends(get_current_user)
+) -> dict:
+    """Switch the active model for a single session (tab-scoped).
+
+    Takes effect on the next LLM call in that session — other sessions
+    (including other browser tabs) are unaffected.
+    """
+    _check_session_access(session_id, user)
+    model_id = body.get("model")
+    if not model_id:
+        raise HTTPException(status_code=400, detail="Missing 'model' field")
+    valid_ids = {m["id"] for m in AVAILABLE_MODELS}
+    if model_id not in valid_ids:
+        raise HTTPException(status_code=400, detail=f"Unknown model: {model_id}")
+    agent_session = session_manager.sessions.get(session_id)
+    if not agent_session:
+        raise HTTPException(status_code=404, detail="Session not found")
+    agent_session.session.update_model(model_id)
+    logger.info(
+        f"Session {session_id} model → {model_id} "
+        f"(by {user.get('username', 'unknown')})"
+    )
+    return {"session_id": session_id, "model": model_id}
 
 
 @router.get("/sessions", response_model=list[SessionInfo])

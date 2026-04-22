@@ -30,26 +30,26 @@ const MODEL_OPTIONS: ModelOption[] = [
     recommended: true,
   },
   {
-    id: 'minimax-m2.5',
-    name: 'MiniMax M2.5',
-    description: 'Via Fireworks',
-    modelPath: 'huggingface/fireworks-ai/MiniMaxAI/MiniMax-M2.5',
-    avatarUrl: getHfAvatarUrl('MiniMaxAI/MiniMax-M2.5'),
+    id: 'minimax-m2.7',
+    name: 'MiniMax M2.7',
+    description: 'Novita',
+    modelPath: 'MiniMaxAI/MiniMax-M2.7',
+    avatarUrl: getHfAvatarUrl('MiniMaxAI/MiniMax-M2.7'),
     recommended: true,
   },
   {
-    id: 'kimi-k2.5',
-    name: 'Kimi K2.5',
-    description: 'Via Novita',
-    modelPath: 'huggingface/novita/moonshotai/kimi-k2.5',
-    avatarUrl: getHfAvatarUrl('moonshotai/Kimi-K2.5'),
+    id: 'kimi-k2.6',
+    name: 'Kimi K2.6',
+    description: 'Novita',
+    modelPath: 'moonshotai/Kimi-K2.6',
+    avatarUrl: getHfAvatarUrl('moonshotai/Kimi-K2.6'),
   },
   {
-    id: 'glm-5',
-    name: 'GLM 5',
-    description: 'Via Novita',
-    modelPath: 'huggingface/novita/zai-org/glm-5',
-    avatarUrl: getHfAvatarUrl('zai-org/GLM-5'),
+    id: 'glm-5.1',
+    name: 'GLM 5.1',
+    description: 'Together',
+    modelPath: 'zai-org/GLM-5.1',
+    avatarUrl: getHfAvatarUrl('zai-org/GLM-5.1'),
   },
 ];
 
@@ -58,6 +58,7 @@ const findModelByPath = (path: string): ModelOption | undefined => {
 };
 
 interface ChatInputProps {
+  sessionId?: string;
   onSend: (text: string) => void;
   onStop?: () => void;
   isProcessing?: boolean;
@@ -65,33 +66,29 @@ interface ChatInputProps {
   placeholder?: string;
 }
 
-export default function ChatInput({ onSend, onStop, isProcessing = false, disabled = false, placeholder = 'Ask anything...' }: ChatInputProps) {
+export default function ChatInput({ sessionId, onSend, onStop, isProcessing = false, disabled = false, placeholder = 'Ask anything...' }: ChatInputProps) {
   const [input, setInput] = useState('');
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const [selectedModelId, setSelectedModelId] = useState<string>(() => {
-    try {
-      const stored = localStorage.getItem('hf-agent-model');
-      if (stored && MODEL_OPTIONS.some(m => m.id === stored)) return stored;
-    } catch { /* localStorage unavailable */ }
-    return MODEL_OPTIONS[0].id;
-  });
+  const [selectedModelId, setSelectedModelId] = useState<string>(MODEL_OPTIONS[0].id);
   const [modelAnchorEl, setModelAnchorEl] = useState<null | HTMLElement>(null);
 
-  // Sync with backend on mount (backend is source of truth, localStorage is just a cache)
+  // Model is per-session: fetch this tab's current model every time the
+  // session changes. Other tabs keep their own selections independently.
   useEffect(() => {
-    fetch('/api/config/model')
+    if (!sessionId) return;
+    let cancelled = false;
+    apiFetch(`/api/session/${sessionId}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (data?.current) {
-          const model = findModelByPath(data.current);
-          if (model) {
-            setSelectedModelId(model.id);
-            try { localStorage.setItem('hf-agent-model', model.id); } catch { /* ignore */ }
-          }
+        if (cancelled) return;
+        if (data?.model) {
+          const model = findModelByPath(data.model);
+          if (model) setSelectedModelId(model.id);
         }
       })
       .catch(() => { /* ignore */ });
-  }, []);
+    return () => { cancelled = true; };
+  }, [sessionId]);
 
   const selectedModel = MODEL_OPTIONS.find(m => m.id === selectedModelId) || MODEL_OPTIONS[0];
 
@@ -129,15 +126,13 @@ export default function ChatInput({ onSend, onStop, isProcessing = false, disabl
 
   const handleSelectModel = async (model: ModelOption) => {
     handleModelClose();
+    if (!sessionId) return;
     try {
-      const res = await apiFetch('/api/config/model', {
+      const res = await apiFetch(`/api/session/${sessionId}/model`, {
         method: 'POST',
         body: JSON.stringify({ model: model.modelPath }),
       });
-      if (res.ok) {
-        setSelectedModelId(model.id);
-        try { localStorage.setItem('hf-agent-model', model.id); } catch { /* ignore */ }
-      }
+      if (res.ok) setSelectedModelId(model.id);
     } catch { /* ignore */ }
   };
 
