@@ -1,59 +1,18 @@
-# Stage 1: Build frontend
-FROM node:20-alpine AS frontend-builder
-WORKDIR /app/frontend
-COPY frontend/package.json frontend/package-lock.json ./
-RUN npm install
-COPY frontend/ ./
-RUN npm run build
+FROM runpod/pytorch:2.1.0-base
 
-# Stage 2: Production
-FROM python:3.12-slim
-
-# Install uv directly from official image
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
-
-# Create user with UID 1000 (required for HF Spaces)
-RUN useradd -m -u 1000 user
-
+# Set the working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# Install additional Python dependencies
+# The base image already has PyTorch, Transformers, and Datasets.
+# We need to add TRL, PEFT, and bitsandbytes for our specific training task.
+RUN pip install --no-cache-dir \
+    trl==1.2.0 \
+    peft==0.19.1 \
+    bitsandbytes==0.49.2
 
-# Copy dependency files
-COPY pyproject.toml uv.lock ./
+# Copy the training script
+COPY train_grpo.py /app/train_grpo.py
 
-# Install dependencies into /app/.venv
-# Use --frozen to ensure exact versions from uv.lock
-RUN uv sync --no-dev --frozen
-
-# Copy application code
-COPY agent/ ./agent/
-COPY backend/ ./backend/
-COPY configs/ ./configs/
-
-# Copy built frontend
-COPY --from=frontend-builder /app/frontend/dist ./static/
-
-# Create directories and set ownership
-RUN mkdir -p /app/session_logs && \
-    chown -R user:user /app
-
-# Switch to non-root user
-USER user
-
-# Set environment
-ENV HOME=/home/user \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    PATH="/app/.venv/bin:$PATH"
-
-# Expose port
-EXPOSE 7860
-
-# Run the application from backend directory
-WORKDIR /app/backend
-CMD ["bash", "start.sh"]
+# Set the entry point
+CMD ["python", "train_grpo.py"]
